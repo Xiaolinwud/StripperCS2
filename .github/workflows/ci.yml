@@ -1,0 +1,115 @@
+name: Build StripperCS2
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            target: linux64
+            sdk_branch: 84a823db042b49d2f6934b770dafbf3a366cef26
+            mm_repo: alliedmodders/metamod-source
+            mm_ref: master
+            cc: gcc
+            cxx: g++
+            artifact_ext: so
+          - os: windows-latest
+            target: win64
+            sdk_branch: 84a823db042b49d2f6934b770dafbf3a366cef26
+            mm_repo: alliedmodders/metamod-source
+            mm_ref: master
+            cc: cl
+            cxx: cl
+            artifact_ext: dll
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python (for Premake)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # ⬇️ 下载并安装 Premake5
+      - name: Download Premake5
+        run: |
+          mkdir -p tools
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            curl -L https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip -o tools/premake.zip
+            unzip -q tools/premake.zip -d tools/
+            chmod +x tools/premake5.exe
+            echo "tools" >> $GITHUB_PATH
+          else
+            curl -L https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz -o tools/premake.tgz
+            tar -xzf tools/premake.tgz -C tools/
+            chmod +x tools/premake-5.0.0-beta2-linux/premake5
+            echo "tools/premake-5.0.0-beta2-linux" >> $GITHUB_PATH
+          fi
+
+      # ⬇️ 克隆 HL2SDKCS2
+      - name: Clone HL2SDKCS2
+        run: |
+          git clone --branch ${{ matrix.sdk_branch }} https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
+          echo "HL2SDKCS2=$(pwd)/hl2sdk-cs2" >> $GITHUB_ENV
+
+      # ⬇️ 克隆 Metamod:Source 2 (MMSOURCE112)
+      - name: Clone Metamod:Source
+        run: |
+          git clone --recursive --branch ${{ matrix.mm_ref }} https://github.com/${{ matrix.mm_repo }}.git mmsource-2.0
+          echo "MMSOURCE112=$(pwd)/mmsource-2.0" >> $GITHUB_ENV
+
+      # ⬇️ 安装依赖
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config libz-dev
+
+      # ⬇️ 运行 Premake5 生成构建文件
+      - name: Generate Project Files with Premake5
+        run: |
+          premake5 gmake2 --os=${{ matrix.target }}
+          ls -la build/
+
+      # ⬇️ 构建项目
+      - name: Build Project
+        if: runner.os == 'Linux'
+        run: |
+          make -j$(nproc) -C build config=release
+          ls -la bin/Release/
+
+      - name: Build Project (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          msbuild /p:Configuration=Release /p:Platform=x64 /m build/StripperCS2.sln
+          dir .\bin\Release\
+
+      # ✅ ⬇️ 打包并上传构建产物
+      - name: Package and Upload Artifact
+        run: |
+          echo "Packaging artifact for ${{ matrix.target }}"
+          mkdir -p artifacts
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp bin/Release/StripperCS2.dll artifacts/
+            zip -r StripperCS2-${{ matrix.target }}.zip artifacts/
+          else
+            cp bin/Release/libStripperCS2.so artifacts/
+            zip -r StripperCS2-${{ matrix.target }}.zip artifacts/
+          fi
+
+      - name: Upload Artifact to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: StripperCS2-${{ matrix.target }}
+          path: StripperCS2-${{ matrix.target }}.zip

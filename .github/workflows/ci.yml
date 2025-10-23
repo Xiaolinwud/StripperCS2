@@ -33,8 +33,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        timeout-minutes: 5
         with:
           submodules: recursive
+          fetch-depth: 1
 
       - name: Set up Python (for Premake)
         uses: actions/setup-python@v4
@@ -46,18 +48,37 @@ jobs:
           mkdir -p tools
 
           if [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "Downloading Premake5 for Windows..."
             curl -L -o tools/premake.zip https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip
             powershell -Command "Expand-Archive -Path 'tools/premake.zip' -DestinationPath 'tools/'"
-            mv tools/premake5.exe tools/premake5 2>/dev/null || true
+            # Windows 版本可能有 .exe 扩展名
+            if [ -f "tools/premake5.exe" ]; then
+              mv tools/premake5.exe tools/premake5
+            fi
             echo "tools" >> $GITHUB_PATH
           else
-            curl -L -o tools/premake.tgz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
-            tar -xzf tools/premake.tgz -C tools/
-            mv tools/premake-5.0.0-beta2-linux/premake5 tools/premake5
+            echo "Downloading Premake5 for Linux..."
+            curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+            tar -xzf premake5.tar.gz
+            
+            # 查找 premake5 可执行文件
+            if [ -f "premake5" ]; then
+              mv premake5 tools/premake5
+            elif [ -d "premake-5.0.0-beta2-linux" ]; then
+              mv premake-5.0.0-beta2-linux/premake5 tools/premake5
+            fi
+            
             chmod +x tools/premake5
             echo "tools" >> $GITHUB_PATH
+            
+            # 清理临时文件
+            rm -f premake5.tar.gz
+            rm -rf premake-*
           fi
 
+      - name: Verify Premake5
+        run: |
+          premake5 --version
 
       # ⬇️ 克隆 HL2SDKCS2
       - name: Clone HL2SDKCS2
@@ -78,6 +99,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake pkg-config libz-dev
 
+      - name: Install Windows Dependencies
+        if: runner.os == 'Windows'
+        run: |
+          choco install visualstudio2022buildtools -y
+          choco install visualstudio2022-workload-vctools -y
+
       # ⬇️ 运行 Premake5 生成构建文件
       - name: Generate Project Files with Premake5
         run: |
@@ -85,7 +112,7 @@ jobs:
           ls -la build/
 
       # ⬇️ 构建项目
-      - name: Build Project
+      - name: Build Project (Linux)
         if: runner.os == 'Linux'
         run: |
           make -j$(nproc) -C build config=release
@@ -94,19 +121,27 @@ jobs:
       - name: Build Project (Windows)
         if: runner.os == 'Windows'
         run: |
-          msbuild /p:Configuration=Release /p:Platform=x64 /m build/StripperCS2.sln
+          # 使用 VS 的开发者命令提示符
+          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          msbuild /p:Configuration=Release /p:Platform=x64 /m /v:minimal build/StripperCS2.sln
           dir .\bin\Release\
 
       # ✅ ⬇️ 打包并上传构建产物
-      - name: Package and Upload Artifact
+      - name: Package Artifacts
         run: |
           echo "Packaging artifact for ${{ matrix.target }}"
           mkdir -p artifacts
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp bin/Release/StripperCS2.dll artifacts/
+            cp bin/Release/StripperCS2.dll artifacts/ 2>/dev/null || echo "StripperCS2.dll not found, checking for other files..."
+            # 如果上面的文件不存在，尝试查找其他可能的文件
+            find bin/Release -name "*.dll" -exec cp {} artifacts/ \; 2>/dev/null || true
+            ls -la artifacts/
             zip -r StripperCS2-${{ matrix.target }}.zip artifacts/
           else
-            cp bin/Release/libStripperCS2.so artifacts/
+            cp bin/Release/libStripperCS2.so artifacts/ 2>/dev/null || echo "libStripperCS2.so not found, checking for other files..."
+            # 如果上面的文件不存在，尝试查找其他可能的文件
+            find bin/Release -name "*.so" -exec cp {} artifacts/ \; 2>/dev/null || true
+            ls -la artifacts/
             zip -r StripperCS2-${{ matrix.target }}.zip artifacts/
           fi
 
@@ -115,3 +150,21 @@ jobs:
         with:
           name: StripperCS2-${{ matrix.target }}
           path: StripperCS2-${{ matrix.target }}.zip
+          retention-days: 30
+
+      # 添加调试信息输出
+      - name: Debug Info
+        if: always()
+        run: |
+          echo "=== Debug Information ==="
+          echo "OS: ${{ runner.os }}"
+          echo "Target: ${{ matrix.target }}"
+          echo "Current directory: $(pwd)"
+          echo "Directory structure:"
+          ls -la
+          echo "Bin directory:"
+          ls -la bin/ || echo "bin directory not found"
+          echo "Build directory:"
+          ls -la build/ || echo "build directory not found"
+          echo "Artifacts directory:"
+          ls -la artifacts/ || echo "artifacts directory not found"

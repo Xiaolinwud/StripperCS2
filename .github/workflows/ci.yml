@@ -41,21 +41,23 @@ jobs:
         with:
           python-version: '3.x'
 
-      # ⬇️ 下载并安装 Premake5
-      - name: Download Premake5
+      - name: Download Premake5 (Fixed for Windows & Linux)
         run: |
           mkdir -p tools
+
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            curl -L https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip -o tools/premake.zip
-            unzip -q tools/premake.zip -d tools/
-            chmod +x tools/premake5.exe
+            curl -L -o tools/premake.zip https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip
+            powershell -Command "Expand-Archive -Path 'tools/premake.zip' -DestinationPath 'tools/'"
+            mv tools/premake5.exe tools/premake5 2>/dev/null || true
             echo "tools" >> $GITHUB_PATH
           else
-            curl -L https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz -o tools/premake.tgz
+            curl -L -o tools/premake.tgz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
             tar -xzf tools/premake.tgz -C tools/
-            chmod +x tools/premake-5.0.0-beta2-linux/premake5
-            echo "tools/premake-5.0.0-beta2-linux" >> $GITHUB_PATH
+            mv tools/premake-5.0.0-beta2-linux/premake5 tools/premake5
+            chmod +x tools/premake5
+            echo "tools" >> $GITHUB_PATH
           fi
+
 
       # ⬇️ 克隆 HL2SDKCS2
       - name: Clone HL2SDKCS2

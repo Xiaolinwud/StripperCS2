@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [ "master", "main" ]
 
-env:
-  HL2SDKCS2: ${{ github.workspace }}/hl2sdk-cs2
-  MMSOURCE112: ${{ github.workspace }}/mmsource-2.0
-
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -19,13 +15,13 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux64
-            sdk_branch: 84a823db042b49d2f6934b770dafbf3a366cef26
+            sdk_branch: cs2
             mm_repo: alliedmodders/metamod-source
             mm_ref: master
             artifact_name: libStripperCS2.so
           - os: windows-latest
             target: win64
-            sdk_branch: 84a823db042b49d2f6934b770dafbf3a366cef26
+            sdk_branch: cs2
             mm_repo: alliedmodders/metamod-source
             mm_ref: master
             artifact_name: StripperCS2.dll
@@ -48,7 +44,7 @@ jobs:
           # 安装 Visual Studio Build Tools
           choco install visualstudio2022buildtools -y --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --quiet"
 
-      # 简化 Premake5 下载 - 分别处理不同平台
+      # 下载 Premake5
       - name: Download Premake5 (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -71,34 +67,63 @@ jobs:
         run: |
           premake5 --version
 
+      # 修复 HL2SDK 克隆 - 使用正确的仓库和分支
       - name: Clone HL2SDKCS2
         run: |
-          git clone --branch ${{ matrix.sdk_branch }} --depth 1 https://github.com/alliedmodders/hl2sdk.git $HL2SDKCS2
+          echo "Cloning HL2SDK for CS2..."
+          git clone --branch ${{ matrix.sdk_branch }} --depth 1 https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
+          echo "HL2SDK cloned successfully"
+          echo "HL2SDKCS2=${{ github.workspace }}/hl2sdk-cs2" >> $GITHUB_ENV
 
+      # 修复 Metamod-Source 克隆
       - name: Clone Metamod:Source
         run: |
-          git clone --branch ${{ matrix.mm_ref }} --depth 1 --recursive https://github.com/${{ matrix.mm_repo }}.git $MMSOURCE112
+          echo "Cloning Metamod:Source..."
+          git clone --branch ${{ matrix.mm_ref }} --depth 1 --recursive https://github.com/${{ matrix.mm_repo }}.git mmsource-2.0
+          echo "Metamod:Source cloned successfully"
+          echo "MMSOURCE112=${{ github.workspace }}/mmsource-2.0" >> $GITHUB_ENV
+
+      # 验证克隆结果
+      - name: Verify Dependencies
+        run: |
+          echo "=== Verifying Dependencies ==="
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            echo "HL2SDKCS2: $env:HL2SDKCS2"
+            echo "MMSOURCE112: $env:MMSOURCE112"
+            dir hl2sdk-cs2 2>nul && echo "HL2SDK found" || echo "HL2SDK not found"
+            dir mmsource-2.0 2>nul && echo "Metamod found" || echo "Metamod not found"
+          else
+            echo "HL2SDKCS2: $HL2SDKCS2"
+            echo "MMSOURCE112: $MMSOURCE112"
+            ls -la hl2sdk-cs2 2>/dev/null && echo "HL2SDK found" || echo "HL2SDK not found"
+            ls -la mmsource-2.0 2>/dev/null && echo "Metamod found" || echo "Metamod not found"
+          fi
 
       # 设置环境变量（Windows 需要特殊处理）
       - name: Setup Environment (Windows)
         if: runner.os == 'Windows'
         run: |
-          echo "HL2SDKCS2=$env:HL2SDKCS2"
-          echo "MMSOURCE112=$env:MMSOURCE112"
-          # 设置 VS 环境变量
-          echo "VS160COMNTOOLS=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\" >> $env:GITHUB_ENV
+          echo "Setting up VS environment..."
+          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
 
       - name: Generate Project Files
         run: |
+          echo "Generating project files..."
+          echo "HL2SDKCS2: $HL2SDKCS2"
+          echo "MMSOURCE112: $MMSOURCE112"
+          
           if [ "${{ runner.os }}" == "Windows" ]; then
             premake5 vs2022
           else
             premake5 gmake2 --os=linux64
           fi
+          
+          echo "Project files generated"
 
       - name: Build Project (Linux)
         if: runner.os == 'Linux'
         run: |
+          echo "Building on Linux..."
           make -j$(nproc) -C build config=release_x86_64
           echo "=== Build Output ==="
           find bin/ -type f -name "*.so" 2>/dev/null || echo "No .so files found"
@@ -106,6 +131,7 @@ jobs:
       - name: Build Project (Windows)
         if: runner.os == 'Windows'
         run: |
+          echo "Building on Windows..."
           # 使用 Developer Command Prompt 设置环境
           "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64 && ^
           msbuild.exe ^
@@ -139,9 +165,9 @@ jobs:
           echo "=== Directory Structure ==="
           ls -la
           echo "=== HL2SDKCS2 Contents ==="
-          ls -la "$HL2SDKCS2" 2>/dev/null || echo "HL2SDKCS2 directory not found"
+          ls -la "hl2sdk-cs2/" 2>/dev/null || echo "HL2SDKCS2 directory not found"
           echo "=== MMSOURCE112 Contents ==="
-          ls -la "$MMSOURCE112" 2>/dev/null || echo "MMSOURCE112 directory not found"
+          ls -la "mmsource-2.0/" 2>/dev/null || echo "MMSOURCE112 directory not found"
           echo "=== Bin Contents ==="
           find bin/ -type f 2>/dev/null || echo "No bin directory"
           echo "=== Build Contents ==="
@@ -156,9 +182,9 @@ jobs:
           echo "=== Directory Structure ==="
           dir
           echo "=== HL2SDKCS2 Contents ==="
-          dir "$env:HL2SDKCS2" 2>nul || echo "HL2SDKCS2 directory not found"
+          dir "hl2sdk-cs2" 2>nul || echo "HL2SDKCS2 directory not found"
           echo "=== MMSOURCE112 Contents ==="
-          dir "$env:MMSOURCE112" 2>nul || echo "MMSOURCE112 directory not found"
+          dir "mmsource-2.0" 2>nul || echo "MMSOURCE112 directory not found"
           echo "=== Bin Contents ==="
           dir bin\ /s 2>nul || echo "No bin directory"
           echo "=== Build Contents ==="

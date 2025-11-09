@@ -85,5 +85,27 @@ project "StripperCS2"
 		path.join("src"),
 	}
 
+-- 在 premake5.lua 末尾添加
+newaction {
+    trigger = "ci-build",
+    description = "Build for CI environment",
+    execute = function()
+        -- 确保环境变量设置
+        if not os.getenv("HL2SDKCS2") then
+            error("HL2SDKCS2 environment variable not set")
+        end
+        if not os.getenv("MMSOURCE112") then
+            error("MMSOURCE112 environment variable not set")
+        end
+        
+        -- 生成项目文件
+        if os.host() == "windows" then
+            os.execute("premake5 vs2022")
+        else
+            os.execute("premake5 gmake2")
+        end
+    end
+}
+
 include "vendor/pcre"
 include "premake/spdlog"

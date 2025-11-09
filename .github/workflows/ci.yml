@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ "master", "main" ]
 
+env:
+  HL2SDKCS2: ${{ github.workspace }}/hl2sdk-cs2
+  MMSOURCE112: ${{ github.workspace }}/mmsource-2.0
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -15,19 +19,21 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux64
-            sdk_branch: cs2
-            mm_repo: alliedmodders/metamod-source
-            mm_ref: master
+            sdk_commit: da981a8984c74641d2a31732a0bac742bfea6e2d # 使用你提供的特定HL2SDK提交
+            mm_ref: 2.0.0 # 使用与HL2SDK提交匹配的Metamod-Source分支
+            manifest_repo: alliedmodders/hl2sdk-manifests
+            manifest_ref: f9558bcc764598cb94c676ea0d0d3870a9b40353 # 你提供的manifest提交
             artifact_name: libStripperCS2.so
           - os: windows-latest
             target: win64
-            sdk_branch: cs2
-            mm_repo: alliedmodders/metamod-source
-            mm_ref: master
+            sdk_commit: da981a8984c74641d2a31732a0bac742bfea6e2d
+            mm_ref: 2.0.0
+            manifest_repo: alliedmodders/hl2sdk-manifests
+            manifest_ref: f9558bcc764598cb94c676ea0d0d3870a9b40353
             artifact_name: StripperCS2.dll
 
     steps:
-      - name: Checkout code
+      - name: Checkout StripperCS2
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -41,84 +47,96 @@ jobs:
       - name: Install Windows Dependencies
         if: runner.os == 'Windows'
         run: |
-          # 安装 Visual Studio Build Tools
-          choco install visualstudio2022buildtools -y --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --quiet"
+          # 安装Visual Studio Build Tools，注意使用--force避免确认提示
+          choco install visualstudio2022buildtools -y --force --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --quiet"
 
-      # 下载 Premake5
+      # 下载并设置Premake5 - 使用更可靠的方法
       - name: Download Premake5 (Linux)
         if: runner.os == 'Linux'
         run: |
-          curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
-          tar -xzf premake5.tar.gz
+          wget -q https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+          tar -xzf premake-5.0.0-beta2-linux.tar.gz
+          chmod +x premake5
           sudo mv premake5 /usr/local/bin/
-          sudo chmod +x /usr/local/bin/premake5
           premake5 --version
 
       - name: Download Premake5 (Windows)
         if: runner.os == 'Windows'
         run: |
           curl -L -o premake5.zip https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip
-          unzip -o premake5.zip
+          unzip -q -o premake5.zip
           mkdir -p C:/tools/premake5
           move premake5.exe C:/tools/premake5/
           echo "C:/tools/premake5" >> $GITHUB_PATH
 
       - name: Verify Premake5
         run: |
-          premake5 --version
+          premake5 --version || echo "Premake5 not in PATH"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            C:/tools/premake5/premake5.exe --version
+          fi
 
-      # 修复 HL2SDK 克隆 - 使用正确的仓库和分支
+      # 克隆HL2SDKCS2 - 使用特定提交
       - name: Clone HL2SDKCS2
         run: |
-          echo "Cloning HL2SDK for CS2..."
-          git clone --branch ${{ matrix.sdk_branch }} --depth 1 https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
-          echo "HL2SDK cloned successfully"
-          echo "HL2SDKCS2=${{ github.workspace }}/hl2sdk-cs2" >> $GITHUB_ENV
+          echo "Cloning HL2SDK at commit: ${{ matrix.sdk_commit }}"
+          git clone https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
+          cd hl2sdk-cs2
+          git checkout ${{ matrix.sdk_commit }}
+          echo "HL2SDKCS2 cloned and checked out successfully"
 
-      # 修复 Metamod-Source 克隆
+      # 克隆Metamod:Source - 使用匹配的分支
       - name: Clone Metamod:Source
         run: |
-          echo "Cloning Metamod:Source..."
-          git clone --branch ${{ matrix.mm_ref }} --depth 1 --recursive https://github.com/${{ matrix.mm_repo }}.git mmsource-2.0
+          echo "Cloning Metamod:Source branch: ${{ matrix.mm_ref }}"
+          git clone --branch ${{ matrix.mm_ref }} --depth 1 --recursive https://github.com/alliedmodders/metamod-source.git mmsource-2.0
           echo "Metamod:Source cloned successfully"
-          echo "MMSOURCE112=${{ github.workspace }}/mmsource-2.0" >> $GITHUB_ENV
 
-      # 验证克隆结果
+      # 克隆hl2sdk-manifests - 用于Premake配置
+      - name: Clone HL2SDK Manifests
+        run: |
+          echo "Cloning hl2sdk-manifests at commit: ${{ matrix.manifest_ref }}"
+          git clone https://github.com/${{ matrix.manifest_repo }}.git hl2sdk-manifests
+          cd hl2sdk-manifests
+          git checkout ${{ matrix.manifest_ref }}
+          echo "HL2SDK manifests cloned successfully"
+
+      # 验证依赖项
       - name: Verify Dependencies
         run: |
           echo "=== Verifying Dependencies ==="
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            echo "HL2SDKCS2: $env:HL2SDKCS2"
-            echo "MMSOURCE112: $env:MMSOURCE112"
-            dir hl2sdk-cs2 2>nul && echo "HL2SDK found" || echo "HL2SDK not found"
-            dir mmsource-2.0 2>nul && echo "Metamod found" || echo "Metamod not found"
-          else
-            echo "HL2SDKCS2: $HL2SDKCS2"
-            echo "MMSOURCE112: $MMSOURCE112"
-            ls -la hl2sdk-cs2 2>/dev/null && echo "HL2SDK found" || echo "HL2SDK not found"
-            ls -la mmsource-2.0 2>/dev/null && echo "Metamod found" || echo "Metamod not found"
-          fi
+          echo "Current directory: $(pwd)"
+          ls -la
+          echo "HL2SDKCS2 exists: $(test -d hl2sdk-cs2 && echo 'YES' || echo 'NO')"
+          echo "MMSOURCE112 exists: $(test -d mmsource-2.0 && echo 'YES' || echo 'NO')"
+          echo "Manifests exist: $(test -d hl2sdk-manifests && echo 'YES' || echo 'NO')"
 
-      # 设置环境变量（Windows 需要特殊处理）
-      - name: Setup Environment (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          echo "Setting up VS environment..."
-          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-
+      # 生成项目文件 - 关键修复步骤
       - name: Generate Project Files
         run: |
-          echo "Generating project files..."
+          echo "=== Generating project files ==="
           echo "HL2SDKCS2: $HL2SDKCS2"
           echo "MMSOURCE112: $MMSOURCE112"
           
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            premake5 vs2022
-          else
-            premake5 gmake2 --os=linux64
+          # 检查环境变量和目录
+          if [ ! -d "$HL2SDKCS2" ]; then
+            echo "ERROR: HL2SDKCS2 directory does not exist: $HL2SDKCS2"
+            exit 1
           fi
           
-          echo "Project files generated"
+          if [ ! -d "$MMSOURCE112" ]; then
+            echo "ERROR: MMSOURCE112 directory does not exist: $MMSOURCE112"
+            exit 1
+          fi
+          
+          # 使用正确的Premake5路径
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            C:/tools/premake5/premake5.exe vs2022 --hl2sdk-root=hl2sdk-manifests
+          else
+            premake5 gmake2 --os=linux64 --hl2sdk-root=hl2sdk-manifests
+          fi
+          
+          echo "Project files generated successfully"
 
       - name: Build Project (Linux)
         if: runner.os == 'Linux'
@@ -126,15 +144,14 @@ jobs:
           echo "Building on Linux..."
           make -j$(nproc) -C build config=release_x86_64
           echo "=== Build Output ==="
-          find bin/ -type f -name "*.so" 2>/dev/null || echo "No .so files found"
+          find bin/ -type f -name "*.so" 2>/dev/null | head -10
 
       - name: Build Project (Windows)
         if: runner.os == 'Windows'
         run: |
           echo "Building on Windows..."
-          # 使用 Developer Command Prompt 设置环境
-          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64 && ^
-          msbuild.exe ^
+          # 使用完整的MSBuild路径并设置VS环境
+          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe" ^
             build/StripperCS2.sln ^
             /p:Configuration=Release ^
             /p:Platform=x64 ^
@@ -144,7 +161,7 @@ jobs:
             /p:WindowsTargetPlatformVersion=10.0
           
           echo "=== Build Output ==="
-          dir bin\ /s 2>nul || echo "No bin directory"
+          dir bin\ /s 2>nul || echo "No bin directory found"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -155,37 +172,18 @@ jobs:
             bin/**/*.so
           retention-days: 30
 
-      # 修复调试信息 - 分别处理不同平台
-      - name: Debug Info (Linux)
-        if: runner.os == 'Linux' && always()
+      - name: Final Debug Info
+        if: always()
         run: |
-          echo "=== Environment Variables ==="
-          echo "HL2SDKCS2: $HL2SDKCS2"
-          echo "MMSOURCE112: $MMSOURCE112"
-          echo "=== Directory Structure ==="
+          echo "=== Final Debug Information ==="
+          echo "Working directory: $(pwd)"
+          echo "Directory contents:"
           ls -la
-          echo "=== HL2SDKCS2 Contents ==="
-          ls -la "hl2sdk-cs2/" 2>/dev/null || echo "HL2SDKCS2 directory not found"
-          echo "=== MMSOURCE112 Contents ==="
-          ls -la "mmsource-2.0/" 2>/dev/null || echo "MMSOURCE112 directory not found"
-          echo "=== Bin Contents ==="
-          find bin/ -type f 2>/dev/null || echo "No bin directory"
-          echo "=== Build Contents ==="
-          find build/ -type f 2>/dev/null || echo "No build directory"
-
-      - name: Debug Info (Windows)
-        if: runner.os == 'Windows' && always()
-        run: |
-          echo "=== Environment Variables ==="
-          echo "HL2SDKCS2: $env:HL2SDKCS2"
-          echo "MMSOURCE112: $env:MMSOURCE112"
-          echo "=== Directory Structure ==="
-          dir
-          echo "=== HL2SDKCS2 Contents ==="
-          dir "hl2sdk-cs2" 2>nul || echo "HL2SDKCS2 directory not found"
-          echo "=== MMSOURCE112 Contents ==="
-          dir "mmsource-2.0" 2>nul || echo "MMSOURCE112 directory not found"
-          echo "=== Bin Contents ==="
-          dir bin\ /s 2>nul || echo "No bin directory"
-          echo "=== Build Contents ==="
-          dir build\ /s 2>nul || echo "No build directory"
+          echo "HL2SDKCS2 contents (first 10):"
+          ls -la hl2sdk-cs2/ 2>/dev/null | head -10 || echo "HL2SDKCS2 not found"
+          echo "MMSOURCE112 contents (first 10):"
+          ls -la mmsource-2.0/ 2>/dev/null | head -10 || echo "MMSOURCE112 not found"
+          echo "Build directory:"
+          ls -la build/ 2>/dev/null | head -10 || echo "Build directory not found"
+          echo "Bin directory:"
+          ls -la bin/ 2>/dev/null | head -10 || echo "Bin directory not found"

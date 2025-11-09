@@ -19,15 +19,15 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux64
-            sdk_commit: da981a8984c74641d2a31732a0bac742bfea6e2d # 使用你提供的特定HL2SDK提交
-            mm_ref: 2.0.0 # 使用与HL2SDK提交匹配的Metamod-Source分支
+            sdk_commit: da981a8984c74641d2a31732a0bac742bfea6e2d
+            mm_ref: master
             manifest_repo: alliedmodders/hl2sdk-manifests
-            manifest_ref: f9558bcc764598cb94c676ea0d0d3870a9b40353 # 你提供的manifest提交
+            manifest_ref: f9558bcc764598cb94c676ea0d0d3870a9b40353
             artifact_name: libStripperCS2.so
           - os: windows-latest
             target: win64
             sdk_commit: da981a8984c74641d2a31732a0bac742bfea6e2d
-            mm_ref: 2.0.0
+            mm_ref: master
             manifest_repo: alliedmodders/hl2sdk-manifests
             manifest_ref: f9558bcc764598cb94c676ea0d0d3870a9b40353
             artifact_name: StripperCS2.dll
@@ -36,6 +36,15 @@ jobs:
       - name: Checkout StripperCS2
         uses: actions/checkout@v4
         with:
+          submodules: recursive
+
+      # 修复：使用 actions/checkout 克隆 Metamod-Source
+      - name: Checkout Metamod-Source
+        uses: actions/checkout@v4
+        with:
+          repository: alliedmodders/metamod-source
+          ref: master
+          path: mmsource-2.0
           submodules: recursive
 
       - name: Install Linux Dependencies
@@ -47,10 +56,9 @@ jobs:
       - name: Install Windows Dependencies
         if: runner.os == 'Windows'
         run: |
-          # 安装Visual Studio Build Tools，注意使用--force避免确认提示
           choco install visualstudio2022buildtools -y --force --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --quiet"
 
-      # 下载并设置Premake5 - 使用更可靠的方法
+      # 下载 Premake5
       - name: Download Premake5 (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -76,7 +84,7 @@ jobs:
             C:/tools/premake5/premake5.exe --version
           fi
 
-      # 克隆HL2SDKCS2 - 使用特定提交
+      # 克隆 HL2SDKCS2 - 使用特定提交
       - name: Clone HL2SDKCS2
         run: |
           echo "Cloning HL2SDK at commit: ${{ matrix.sdk_commit }}"
@@ -85,14 +93,7 @@ jobs:
           git checkout ${{ matrix.sdk_commit }}
           echo "HL2SDKCS2 cloned and checked out successfully"
 
-      # 克隆Metamod:Source - 使用匹配的分支
-      - name: Clone Metamod:Source
-        run: |
-          echo "Cloning Metamod:Source branch: ${{ matrix.mm_ref }}"
-          git clone --branch ${{ matrix.mm_ref }} --depth 1 --recursive https://github.com/alliedmodders/metamod-source.git mmsource-2.0
-          echo "Metamod:Source cloned successfully"
-
-      # 克隆hl2sdk-manifests - 用于Premake配置
+      # 克隆 hl2sdk-manifests
       - name: Clone HL2SDK Manifests
         run: |
           echo "Cloning hl2sdk-manifests at commit: ${{ matrix.manifest_ref }}"
@@ -110,8 +111,12 @@ jobs:
           echo "HL2SDKCS2 exists: $(test -d hl2sdk-cs2 && echo 'YES' || echo 'NO')"
           echo "MMSOURCE112 exists: $(test -d mmsource-2.0 && echo 'YES' || echo 'NO')"
           echo "Manifests exist: $(test -d hl2sdk-manifests && echo 'YES' || echo 'NO')"
+          if [ -d "mmsource-2.0" ]; then
+            echo "Metamod-Source contents (first 5):"
+            ls -la mmsource-2.0/ | head -10
+          fi
 
-      # 生成项目文件 - 关键修复步骤
+      # 生成项目文件
       - name: Generate Project Files
         run: |
           echo "=== Generating project files ==="
@@ -150,7 +155,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           echo "Building on Windows..."
-          # 使用完整的MSBuild路径并设置VS环境
+          # 使用完整的MSBuild路径
           "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe" ^
             build/StripperCS2.sln ^
             /p:Configuration=Release ^
@@ -179,10 +184,9 @@ jobs:
           echo "Working directory: $(pwd)"
           echo "Directory contents:"
           ls -la
-          echo "HL2SDKCS2 contents (first 10):"
-          ls -la hl2sdk-cs2/ 2>/dev/null | head -10 || echo "HL2SDKCS2 not found"
-          echo "MMSOURCE112 contents (first 10):"
-          ls -la mmsource-2.0/ 2>/dev/null | head -10 || echo "MMSOURCE112 not found"
+          echo "HL2SDKCS2 exists: $(test -d hl2sdk-cs2 && echo 'YES' || echo 'NO')"
+          echo "MMSOURCE112 exists: $(test -d mmsource-2.0 && echo 'YES' || echo 'NO')"
+          echo "Manifests exist: $(test -d hl2sdk-manifests && echo 'YES' || echo 'NO')"
           echo "Build directory:"
           ls -la build/ 2>/dev/null | head -10 || echo "Build directory not found"
           echo "Bin directory:"

@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ "master", "main" ]
 
+env:
+  HL2SDKCS2: ${{ github.workspace }}/hl2sdk-cs2
+  MMSOURCE112: ${{ github.workspace }}/mmsource-2.0
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -18,86 +22,27 @@ jobs:
             sdk_branch: 84a823db042b49d2f6934b770dafbf3a366cef26
             mm_repo: alliedmodders/metamod-source
             mm_ref: master
-            cc: gcc
-            cxx: g++
-            artifact_ext: so
+            premake_os: linux
+            artifact_name: libStripperCS2.so
           - os: windows-latest
             target: win64
             sdk_branch: 84a823db042b49d2f6934b770dafbf3a366cef26
             mm_repo: alliedmodders/metamod-source
             mm_ref: master
-            cc: cl
-            cxx: cl
-            artifact_ext: dll
+            premake_os: windows
+            artifact_name: StripperCS2.dll
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        timeout-minutes: 5
         with:
           submodules: recursive
-          fetch-depth: 1
 
-      - name: Set up Python (for Premake)
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
-      - name: Download Premake5 (Fixed for Windows & Linux)
-        run: |
-          mkdir -p tools
-
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            echo "Downloading Premake5 for Windows..."
-            curl -L -o tools/premake.zip https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip
-            powershell -Command "Expand-Archive -Path 'tools/premake.zip' -DestinationPath 'tools/'"
-            # Windows 版本可能有 .exe 扩展名
-            if [ -f "tools/premake5.exe" ]; then
-              mv tools/premake5.exe tools/premake5
-            fi
-            echo "tools" >> $GITHUB_PATH
-          else
-            echo "Downloading Premake5 for Linux..."
-            curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
-            tar -xzf premake5.tar.gz
-            
-            # 查找 premake5 可执行文件
-            if [ -f "premake5" ]; then
-              mv premake5 tools/premake5
-            elif [ -d "premake-5.0.0-beta2-linux" ]; then
-              mv premake-5.0.0-beta2-linux/premake5 tools/premake5
-            fi
-            
-            chmod +x tools/premake5
-            echo "tools" >> $GITHUB_PATH
-            
-            # 清理临时文件
-            rm -f premake5.tar.gz
-            rm -rf premake-*
-          fi
-
-      - name: Verify Premake5
-        run: |
-          premake5 --version
-
-      # ⬇️ 克隆 HL2SDKCS2
-      - name: Clone HL2SDKCS2
-        run: |
-          git clone --branch ${{ matrix.sdk_branch }} https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
-          echo "HL2SDKCS2=$(pwd)/hl2sdk-cs2" >> $GITHUB_ENV
-
-      # ⬇️ 克隆 Metamod:Source 2 (MMSOURCE112)
-      - name: Clone Metamod:Source
-        run: |
-          git clone --recursive --branch ${{ matrix.mm_ref }} https://github.com/${{ matrix.mm_repo }}.git mmsource-2.0
-          echo "MMSOURCE112=$(pwd)/mmsource-2.0" >> $GITHUB_ENV
-
-      # ⬇️ 安装依赖
       - name: Install Linux Dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config libz-dev
+          sudo apt-get install -y build-essential gcc-multilib g++-multilib lib32z1
 
       - name: Install Windows Dependencies
         if: runner.os == 'Windows'
@@ -105,66 +50,83 @@ jobs:
           choco install visualstudio2022buildtools -y
           choco install visualstudio2022-workload-vctools -y
 
-      # ⬇️ 运行 Premake5 生成构建文件
-      - name: Generate Project Files with Premake5
+      # 简化 Premake5 下载
+      - name: Download Premake5
         run: |
-          premake5 gmake2 --os=${{ matrix.target }}
-          ls -la build/
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            curl -L -o premake5.zip https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip
+            unzip premake5.zip
+            mv premake5.exe /usr/local/bin/premake5.exe
+          else
+            curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+            tar -xzf premake5.tar.gz
+            mv premake5 /usr/local/bin/premake5
+            chmod +x /usr/local/bin/premake5
+          fi
 
-      # ⬇️ 构建项目
+      - name: Clone HL2SDKCS2
+        run: |
+          git clone --branch ${{ matrix.sdk_branch }} https://github.com/alliedmodders/hl2sdk.git $HL2SDKCS2
+
+      - name: Clone Metamod:Source
+        run: |
+          git clone --recursive --branch ${{ matrix.mm_ref }} https://github.com/${{ matrix.mm_repo }}.git $MMSOURCE112
+
+      # 构建依赖库
+      - name: Build Dependencies
+        run: |
+          echo "Building dependencies..."
+          # 确保 vendor 目录存在
+          mkdir -p vendor
+          
+          # 这里需要根据项目的实际依赖构建流程来补充
+          # 由于项目包含 vendor/pcre 和 premake/spdlog，可能需要先构建这些
+
+      # 为不同平台使用不同的 Premake 参数
+      - name: Generate Project Files
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            premake5 vs2022
+          else
+            premake5 gmake2
+          fi
+
       - name: Build Project (Linux)
         if: runner.os == 'Linux'
         run: |
-          make -j$(nproc) -C build config=release
-          ls -la bin/Release/
+          make -j$(nproc) -C build config=release_x86_64
+          ls -la bin/
 
       - name: Build Project (Windows)
         if: runner.os == 'Windows'
         run: |
-          # 使用 VS 的开发者命令提示符
-          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          msbuild /p:Configuration=Release /p:Platform=x64 /m /v:minimal build/StripperCS2.sln
-          dir .\bin\Release\
+          # 使用正确的 MSBuild 路径
+          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe" ^
+            /p:Configuration=Release ^
+            /p:Platform=x64 ^
+            /p:PlatformToolset=v143 ^
+            /m ^
+            /v:minimal ^
+            build/StripperCS2.sln
 
-      # ✅ ⬇️ 打包并上传构建产物
-      - name: Package Artifacts
-        run: |
-          echo "Packaging artifact for ${{ matrix.target }}"
-          mkdir -p artifacts
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp bin/Release/StripperCS2.dll artifacts/ 2>/dev/null || echo "StripperCS2.dll not found, checking for other files..."
-            # 如果上面的文件不存在，尝试查找其他可能的文件
-            find bin/Release -name "*.dll" -exec cp {} artifacts/ \; 2>/dev/null || true
-            ls -la artifacts/
-            zip -r StripperCS2-${{ matrix.target }}.zip artifacts/
-          else
-            cp bin/Release/libStripperCS2.so artifacts/ 2>/dev/null || echo "libStripperCS2.so not found, checking for other files..."
-            # 如果上面的文件不存在，尝试查找其他可能的文件
-            find bin/Release -name "*.so" -exec cp {} artifacts/ \; 2>/dev/null || true
-            ls -la artifacts/
-            zip -r StripperCS2-${{ matrix.target }}.zip artifacts/
-          fi
-
-      - name: Upload Artifact to GitHub
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: StripperCS2-${{ matrix.target }}
-          path: StripperCS2-${{ matrix.target }}.zip
+          path: |
+            bin/**/*.dll
+            bin/**/*.so
           retention-days: 30
 
-      # 添加调试信息输出
       - name: Debug Info
         if: always()
         run: |
-          echo "=== Debug Information ==="
-          echo "OS: ${{ runner.os }}"
-          echo "Target: ${{ matrix.target }}"
-          echo "Current directory: $(pwd)"
-          echo "Directory structure:"
+          echo "=== Environment Variables ==="
+          echo "HL2SDKCS2: $HL2SDKCS2"
+          echo "MMSOURCE112: $MMSOURCE112"
+          echo "=== Directory Structure ==="
           ls -la
-          echo "Bin directory:"
-          ls -la bin/ || echo "bin directory not found"
-          echo "Build directory:"
-          ls -la build/ || echo "build directory not found"
-          echo "Artifacts directory:"
-          ls -la artifacts/ || echo "artifacts directory not found"
+          echo "=== Bin Contents ==="
+          find bin/ -type f 2>/dev/null || echo "No bin directory"
+          echo "=== Build Contents ==="
+          find build/ -type f 2>/dev/null || echo "No build directory"

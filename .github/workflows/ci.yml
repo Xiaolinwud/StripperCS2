@@ -26,129 +26,115 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Checkout Metamod-Source
-        uses: actions/checkout@v4
-        with:
-          repository: alliedmodders/metamod-source
-          ref: master
-          path: mmsource-2.0
-          submodules: recursive
-
-      - name: Install Linux Dependencies
-        if: runner.os == 'Linux'
+      # 修复：手动下载 Premake5
+      - name: Download Premake5
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential gcc-multilib g++-multilib lib32z1
+          if [ "${{ runner.os }}" == "Linux" ]; then
+            wget -q https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+            tar -xzf premake-5.0.0-beta2-linux.tar.gz
+            chmod +x premake5
+            sudo mv premake5 /usr/local/bin/
+          else
+            curl -L -o premake5.zip https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip
+            unzip -q -o premake5.zip
+            mkdir -p C:/tools/premake5
+            move premake5.exe C:/tools/premake5/
+            echo "C:/tools/premake5" >> $GITHUB_PATH
+          fi
 
-      - name: Install Windows Dependencies
-        if: runner.os == 'Windows'
+      - name: Verify Premake5
         run: |
-          choco install visualstudio2022buildtools -y --force --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --quiet"
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            C:/tools/premake5/premake5.exe --version
+          else
+            premake5 --version
+          fi
 
-      # 简化 Premake5 下载 - 使用 GitHub Action
-      - name: Setup Premake5
-        uses: BrokenAdmin/premake5-github-action@v1
-        with:
-          version: 5.0.0-beta2
-
-      # 修复 HL2SDK 克隆 - 使用更简单的方法
-      - name: Clone HL2SDKCS2
+      # 修复：克隆 Metamod-Source（使用正确的仓库）
+      - name: Clone Metamod-Source
         run: |
-          echo "Cloning HL2SDK for CS2..."
-          git clone https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
-          cd hl2sdk-cs2
-          # 使用最新的 CS2 SDK 提交
-          git checkout da981a8984c74641d2a31732a0bac742bfea6e2d
-          echo "HL2SDKCS2 cloned successfully"
+          git clone --branch master --depth 1 --recursive https://github.com/alliedmodders/metamod-source.git mmsource-2.0
 
-      # 修复 manifests 克隆
-      - name: Clone HL2SDK Manifests
+      # 修复：克隆 HL2SDK
+      - name: Clone HL2SDK
         run: |
-          echo "Cloning hl2sdk-manifests..."
-          git clone https://github.com/alliedmodders/hl2sdk-manifests.git hl2sdk-manifests
-          cd hl2sdk-manifests
-          git checkout f9558bcc764598cb94c676ea0d0d3870a9b40353
-          echo "HL2SDK manifests cloned successfully"
+          git clone --branch cs2 --depth 1 https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
 
-      # 验证依赖项
+      # 修复：克隆 manifests
+      - name: Clone Manifests
+        run: |
+          git clone --branch master --depth 1 https://github.com/alliedmodders/hl2sdk-manifests.git hl2sdk-manifests
+
+      # 验证克隆结果
       - name: Verify Dependencies
         run: |
-          echo "=== Verifying Dependencies ==="
-          echo "Current directory: $(pwd)"
-          echo "Contents:"
-          ls -la
-          echo "--- HL2SDKCS2 ---"
-          ls -la hl2sdk-cs2/ 2>/dev/null | head -5 || echo "HL2SDKCS2 not found"
-          echo "--- MMSOURCE112 ---"
-          ls -la mmsource-2.0/ 2>/dev/null | head -5 || echo "MMSOURCE112 not found"
-          echo "--- Manifests ---"
-          ls -la hl2sdk-manifests/ 2>/dev/null | head -5 || echo "Manifests not found"
+          echo "=== Dependencies Status ==="
+          echo "Metamod-Source: $(ls -la mmsource-2.0/ 2>/dev/null | head -1 || echo 'NOT FOUND')"
+          echo "HL2SDK: $(ls -la hl2sdk-cs2/ 2>/dev/null | head -1 || echo 'NOT FOUND')"
+          echo "Manifests: $(ls -la hl2sdk-manifests/ 2>/dev/null | head -1 || echo 'NOT FOUND')"
 
       # 设置环境变量
-      - name: Set Environment Variables
+      - name: Set Environment
         run: |
           echo "HL2SDKCS2=${{ github.workspace }}/hl2sdk-cs2" >> $GITHUB_ENV
           echo "MMSOURCE112=${{ github.workspace }}/mmsource-2.0" >> $GITHUB_ENV
-          echo "HL2SDK_MANIFESTS=${{ github.workspace }}/hl2sdk-manifests" >> $GITHUB_ENV
 
-      # 生成项目文件 - 简化版本
+      # 安装构建依赖
+      - name: Install Build Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib g++-multilib
+
+      - name: Install Build Dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # 确保 VS Build Tools 可用
+          echo "Windows build tools should be pre-installed"
+
+      # 生成项目文件 - 关键步骤
       - name: Generate Project Files
         run: |
-          echo "=== Generating project files ==="
+          echo "=== Generating Project Files ==="
           echo "Current directory: $(pwd)"
-          echo "Environment variables:"
-          echo "HL2SDKCS2: $HL2SDKCS2"
-          echo "MMSOURCE112: $MMSOURCE112"
-          echo "HL2SDK_MANIFESTS: $HL2SDK_MANIFESTS"
-          
-          # 检查关键目录
-          echo "Checking directories..."
-          [ -d "$HL2SDKCS2" ] && echo "✓ HL2SDKCS2 exists" || echo "✗ HL2SDKCS2 missing"
-          [ -d "$MMSOURCE112" ] && echo "✓ MMSOURCE112 exists" || echo "✗ MMSOURCE112 missing"
-          [ -d "$HL2SDK_MANIFESTS" ] && echo "✓ Manifests exist" || echo "✗ Manifests missing"
-          
-          # 列出 manifests 内容
-          echo "Manifests contents:"
-          ls -la "$HL2SDK_MANIFESTS" || echo "Cannot list manifests"
+          echo "Directory contents:"
+          ls -la
           
           echo "Running premake5..."
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            premake5 vs2022 --hl2sdk-root=hl2sdk-manifests
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            C:/tools/premake5/premake5.exe vs2022
           else
-            premake5 gmake2 --os=linux64 --hl2sdk-root=hl2sdk-manifests
+            premake5 gmake2 --os=linux64
           fi
           
-          echo "Checking if build directory was created..."
-          ls -la build/ 2>/dev/null && echo "✓ Build directory created" || echo "✗ Build directory not created"
+          echo "Build directory contents:"
+          ls -la build/ 2>/dev/null || echo "Build directory not created"
 
+      # 构建项目
       - name: Build Project (Linux)
         if: runner.os == 'Linux'
         run: |
           echo "Building on Linux..."
-          # 先检查 build 目录是否存在
           if [ ! -d "build" ]; then
-            echo "ERROR: build directory does not exist!"
-            echo "Trying to generate project files again..."
-            premake5 gmake2 --os=linux64 --hl2sdk-root=hl2sdk-manifests
+            echo "ERROR: Build directory missing, regenerating..."
+            premake5 gmake2 --os=linux64
           fi
-          
           make -j$(nproc) -C build config=release_x86_64
-          echo "=== Build Output ==="
-          find bin/ -type f 2>/dev/null || echo "No build output found"
+          
+          echo "Build output:"
+          find bin/ -type f 2>/dev/null || echo "No build output"
 
       - name: Build Project (Windows)
         if: runner.os == 'Windows'
         run: |
           echo "Building on Windows..."
-          # 先检查 build 目录是否存在
           if (!(Test-Path "build")) {
-            echo "ERROR: build directory does not exist!"
-            echo "Trying to generate project files again..."
-            premake5 vs2022 --hl2sdk-root=hl2sdk-manifests
+            echo "ERROR: Build directory missing, regenerating..."
+            C:/tools/premake5/premake5.exe vs2022
           }
           
-          # 使用 MSBuild
-          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe" `
+          # 使用 VS Build Tools
+          "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe" `
             build/StripperCS2.sln `
             /p:Configuration=Release `
             /p:Platform=x64 `
@@ -156,10 +142,11 @@ jobs:
             /m `
             /v:minimal
           
-          echo "=== Build Output ==="
-          Get-ChildItem -Path bin -Recurse -ErrorAction SilentlyContinue | Select-Object Name, FullName
+          echo "Build output:"
+          Get-ChildItem -Path bin -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
 
-      - name: Upload Artifact
+      # 上传制品
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: StripperCS2-${{ matrix.target }}
@@ -168,17 +155,19 @@ jobs:
             bin/**/*.so
           retention-days: 30
 
-      # 简化的调试信息 - 避免错误
-      - name: Final Status Check
+      # 最终状态报告（简化版）
+      - name: Final Report
         if: always()
         run: |
-          echo "=== Build Status Check ==="
-          echo "HL2SDKCS2: $(test -d hl2sdk-cs2 && echo 'OK' || echo 'MISSING')"
-          echo "MMSOURCE112: $(test -d mmsource-2.0 && echo 'OK' || echo 'MISSING')"
-          echo "Manifests: $(test -d hl2sdk-manifests && echo 'OK' || echo 'MISSING')"
-          echo "Build dir: $(test -d build && echo 'OK' || echo 'MISSING')"
-          echo "Bin dir: $(test -d bin && echo 'OK' || echo 'MISSING')"
+          echo "=== Build Final Report ==="
+          echo "Dependencies:"
+          echo "  Metamod: $(test -d mmsource-2.0 && echo '✓' || echo '✗')"
+          echo "  HL2SDK: $(test -d hl2sdk-cs2 && echo '✓' || echo '✗')"
+          echo "  Manifests: $(test -d hl2sdk-manifests && echo '✓' || echo '✗')"
+          echo "Build:"
+          echo "  Build dir: $(test -d build && echo '✓' || echo '✗')"
+          echo "  Bin dir: $(test -d bin && echo '✓' || echo '✗')"
           if [ -d "bin" ]; then
-            echo "Bin contents:"
-            find bin/ -type f 2>/dev/null || echo "No files in bin"
+            echo "Built files:"
+            find bin/ -type f 2>/dev/null | while read file; do echo "  - $file"; done || echo "  No files"
           fi

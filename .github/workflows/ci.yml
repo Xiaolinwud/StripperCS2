@@ -26,7 +26,7 @@ jobs:
         with:
           submodules: recursive
 
-      # 修复：手动下载 Premake5
+      # 下载 Premake5
       - name: Download Premake5
         run: |
           if [ "${{ runner.os }}" == "Linux" ]; then
@@ -50,17 +50,15 @@ jobs:
             premake5 --version
           fi
 
-      # 修复：克隆 Metamod-Source（使用正确的仓库）
+      # 克隆依赖库
       - name: Clone Metamod-Source
         run: |
           git clone --branch master --depth 1 --recursive https://github.com/alliedmodders/metamod-source.git mmsource-2.0
 
-      # 修复：克隆 HL2SDK
       - name: Clone HL2SDK
         run: |
           git clone --branch cs2 --depth 1 https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
 
-      # 修复：克隆 manifests
       - name: Clone Manifests
         run: |
           git clone --branch master --depth 1 https://github.com/alliedmodders/hl2sdk-manifests.git hl2sdk-manifests
@@ -86,13 +84,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-multilib g++-multilib
 
-      - name: Install Build Dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          # 确保 VS Build Tools 可用
-          echo "Windows build tools should be pre-installed"
-
-      # 生成项目文件 - 关键步骤
+      # 生成项目文件
       - name: Generate Project Files
         run: |
           echo "=== Generating Project Files ==="
@@ -155,11 +147,11 @@ jobs:
             bin/**/*.so
           retention-days: 30
 
-      # 最终状态报告（简化版）
-      - name: Final Report
-        if: always()
+      # 最终状态报告 - 分别处理 Linux 和 Windows
+      - name: Final Report (Linux)
+        if: runner.os == 'Linux' && always()
         run: |
-          echo "=== Build Final Report ==="
+          echo "=== Build Final Report (Linux) ==="
           echo "Dependencies:"
           echo "  Metamod: $(test -d mmsource-2.0 && echo '✓' || echo '✗')"
           echo "  HL2SDK: $(test -d hl2sdk-cs2 && echo '✓' || echo '✗')"
@@ -171,3 +163,24 @@ jobs:
             echo "Built files:"
             find bin/ -type f 2>/dev/null | while read file; do echo "  - $file"; done || echo "  No files"
           fi
+
+      - name: Final Report (Windows)
+        if: runner.os == 'Windows' && always()
+        run: |
+          echo "=== Build Final Report (Windows) ==="
+          echo "Dependencies:"
+          Write-Host "  Metamod: $((Test-Path "mmsource-2.0") ? '✓' : '✗')"
+          Write-Host "  HL2SDK: $((Test-Path "hl2sdk-cs2") ? '✓' : '✗')"
+          Write-Host "  Manifests: $((Test-Path "hl2sdk-manifests") ? '✓' : '✗')"
+          Write-Host "Build:"
+          Write-Host "  Build dir: $((Test-Path "build") ? '✓' : '✗')"
+          Write-Host "  Bin dir: $((Test-Path "bin") ? '✓' : '✗')"
+          if (Test-Path "bin") {
+            Write-Host "Built files:"
+            Get-ChildItem -Path bin -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "  - $($_.FullName)"
+            }
+            if (-not (Get-ChildItem -Path bin -Recurse -File -ErrorAction SilentlyContinue)) {
+              Write-Host "  No files"
+            }
+          }

@@ -38,7 +38,6 @@ jobs:
         with:
           submodules: recursive
 
-      # 修复：使用 actions/checkout 克隆 Metamod-Source
       - name: Checkout Metamod-Source
         uses: actions/checkout@v4
         with:
@@ -58,7 +57,6 @@ jobs:
         run: |
           choco install visualstudio2022buildtools -y --force --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --quiet"
 
-      # 下载 Premake5
       - name: Download Premake5 (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -84,7 +82,6 @@ jobs:
             C:/tools/premake5/premake5.exe --version
           fi
 
-      # 克隆 HL2SDKCS2 - 使用特定提交
       - name: Clone HL2SDKCS2
         run: |
           echo "Cloning HL2SDK at commit: ${{ matrix.sdk_commit }}"
@@ -93,7 +90,6 @@ jobs:
           git checkout ${{ matrix.sdk_commit }}
           echo "HL2SDKCS2 cloned and checked out successfully"
 
-      # 克隆 hl2sdk-manifests
       - name: Clone HL2SDK Manifests
         run: |
           echo "Cloning hl2sdk-manifests at commit: ${{ matrix.manifest_ref }}"
@@ -102,7 +98,6 @@ jobs:
           git checkout ${{ matrix.manifest_ref }}
           echo "HL2SDK manifests cloned successfully"
 
-      # 验证依赖项
       - name: Verify Dependencies
         run: |
           echo "=== Verifying Dependencies ==="
@@ -116,14 +111,12 @@ jobs:
             ls -la mmsource-2.0/ | head -10
           fi
 
-      # 生成项目文件
       - name: Generate Project Files
         run: |
           echo "=== Generating project files ==="
           echo "HL2SDKCS2: $HL2SDKCS2"
           echo "MMSOURCE112: $MMSOURCE112"
           
-          # 检查环境变量和目录
           if [ ! -d "$HL2SDKCS2" ]; then
             echo "ERROR: HL2SDKCS2 directory does not exist: $HL2SDKCS2"
             exit 1
@@ -134,7 +127,6 @@ jobs:
             exit 1
           fi
           
-          # 使用正确的Premake5路径
           if [ "${{ runner.os }}" = "Windows" ]; then
             C:/tools/premake5/premake5.exe vs2022 --hl2sdk-root=hl2sdk-manifests
           else
@@ -155,7 +147,6 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           echo "Building on Windows..."
-          # 使用完整的MSBuild路径
           "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe" ^
             build/StripperCS2.sln ^
             /p:Configuration=Release ^
@@ -177,10 +168,11 @@ jobs:
             bin/**/*.so
           retention-days: 30
 
-      - name: Final Debug Info
-        if: always()
+      # 修复调试信息 - 分别处理 Windows 和 Linux
+      - name: Final Debug Info (Linux)
+        if: runner.os == 'Linux' && always()
         run: |
-          echo "=== Final Debug Information ==="
+          echo "=== Final Debug Information (Linux) ==="
           echo "Working directory: $(pwd)"
           echo "Directory contents:"
           ls -la
@@ -191,3 +183,20 @@ jobs:
           ls -la build/ 2>/dev/null | head -10 || echo "Build directory not found"
           echo "Bin directory:"
           ls -la bin/ 2>/dev/null | head -10 || echo "Bin directory not found"
+
+      - name: Final Debug Info (Windows)
+        if: runner.os == 'Windows' && always()
+        run: |
+          echo "=== Final Debug Information (Windows) ==="
+          echo "Working directory: $pwd"
+          echo "Directory contents:"
+          dir
+          echo "HL2SDKCS2 exists: $(Test-Path hl2sdk-cs2 && echo 'YES' || echo 'NO')"
+          echo "MMSOURCE112 exists: $(Test-Path mmsource-2.0 && echo 'YES' || echo 'NO')"
+          echo "Manifests exist: $(Test-Path hl2sdk-manifests && echo 'YES' || echo 'NO')"
+          echo "Build directory:"
+          dir build\ 2>$null | Select-Object -First 10
+          if ($LASTEXITCODE -ne 0) { echo "Build directory not found" }
+          echo "Bin directory:"
+          dir bin\ 2>$null | Select-Object -First 10
+          if ($LASTEXITCODE -ne 0) { echo "Bin directory not found" }
